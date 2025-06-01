@@ -8,7 +8,7 @@ def main():
         for batch_idx, data in enumerate(dataloader_train):
             x, y = data
             x, y = x.to(device), y.to(device)
-            # ================================== Mixup ========================================
+            # ================================== Minup ========================================
             # num_classes = 11  # 类别数
             # y_onehot = torch.zeros(y.size(0), num_classes).to(device)
             # y_onehot.scatter_(1, y.unsqueeze(1), 1)  # shape [b, num_classes]
@@ -27,7 +27,7 @@ def main():
             loss = metric_cpt.loss_cpt(yp, y, mode='train')
             acc = metric_cpt.acc_cpt(yp, y, mode='train')
             # 反向传播和优化
-            optimizer.zero_grad() 
+            optimizer.zero_grad()  # PyTorch 清空梯度
             # loss.backward()
             # optimizer.step()
             scaler.scale(loss).backward()
