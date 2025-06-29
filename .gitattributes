@@ -1,2 +1,0 @@
-ML2023Spring-hw5/cpt/transformer_25.436.pt filter=lfs diff=lfs merge=lfs -text
-ML2023Spring-hw5/DATA/* filter=lfs diff=lfs merge=lfs -text
