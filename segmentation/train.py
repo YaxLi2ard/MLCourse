@@ -9,7 +9,10 @@ def train():
             x, y = x.to(device), y.to(device)
             with autocast():  # device_type=device.type
                 yp = model(x)
-                yp = yp.float()
+                if isinstance(yp, list):
+                    yp = [item.float() for item in yp]
+                else:
+                    yp = yp.float()
                 # 计算损失
             (loss, mpa, miou) = metric_cpt.cpt_update(yp, y, mode='train')
             # 反向传播和优化
@@ -63,6 +66,8 @@ def train():
                 x, y = next(iter_val)
                 x, y = x.to(device), y.to(device)
                 yp = model(x)
+                if isinstance(yp, list):
+                    yp = yp[0]
                 yp = yp.argmax(dim=1).unsqueeze(dim=1)  # [B, 1, H, W]
                 overlay = get_image_mask_overlay(x[0], yp[0], alpha=0.5)
                 overlay = (overlay * 255).astype(np.uint8)

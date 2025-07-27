@@ -8,6 +8,8 @@ from model.UNet import UNet
 from model.UNet_ResNet import UNet_ResNet
 from model.UNet_ import UNet_
 from model.DeepLabV3 import DeepLabV3
+from model.DeepLabV3p import DeepLabV3p
+from model.HRNet import HRNet
 from PIL import Image
 import numpy as np
 import os
@@ -35,6 +37,8 @@ def detect(model, img_pth, save_pth='output.png'):
     # 前向推理
     with torch.no_grad():
         output = model(input_tensor)  # [1, num_classes, H, W]
+        if isinstance(output, list):
+            output = output[0]
         pred = torch.argmax(output.squeeze(), dim=0).cpu().numpy()  # [H, W]
     # 转为彩色图
     color_mask = np.zeros((pred.shape[0], pred.shape[1], 3), dtype=np.uint8)
@@ -51,19 +55,38 @@ def load_weights(model, cpt_pth):
 
 if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    fcn = FCN(num_classes=21, backbone='resnet50', pretrained=False).to(device)
-    unet = UNet_ResNet(num_classes=21, backbone='resnet50', pretrained=False).to(device)
-    deeplab = DeepLabV3(num_classes=21, backbone='resnet50', pretrained=False).to(device)
-    
-    fcn = load_weights(fcn, 'cpt/fcn.pt')
-    unet = load_weights(unet, 'cpt/unet_resnet50.pt')
-    deeplab = load_weights(deeplab, 'cpt/deeplabv3.pt')
 
     img_root = '/root/autodl-tmp/MLCourseDataset/pascalvoc/VOCdevkit/VOC2012/JPEGImages'
-    img_name = '2011_003011'
+    img_name = ['2007_000033', '2007_000063', '2007_000392', '2007_000837', '2007_001311', '2007_001955', '2007_002361', '2007_003131', '2007_005331', '2007_009096', 
+                '2007_009923', '2008_000765', '2008_001715', '2008_003105', '2008_007507', '2009_000989', '2009_003003', '2009_003551', '2009_005302', '2010_000065', 
+                '2010_000530', '2010_002030', '2010_003771', '2011_000226', '2011_001910', '2011_003011']
     save_root = 'output'
-    img_pth = os.path.join(img_root, img_name + '.jpg')
 
-    detect(fcn, img_pth, save_pth=os.path.join(save_root, f'{img_name}_fcn.png'))
-    detect(unet, img_pth, save_pth=os.path.join(save_root, f'{img_name}_unet.png'))
-    detect(deeplab, img_pth, save_pth=os.path.join(save_root, f'{img_name}_deeplab.png'))
+    # fcn = FCN(num_classes=21, backbone='resnet50', pretrained=False).to(device)
+    # unet = UNet_ResNet(num_classes=21, backbone='resnet50', pretrained=False).to(device)
+    # deeplab = DeepLabV3(num_classes=21, backbone='resnet50', pretrained=False).to(device)
+    
+    # fcn = load_weights(fcn, 'cpt/fcn.pt')
+    # unet = load_weights(unet, 'cpt/unet_resnet50.pt')
+    # deeplab = load_weights(deeplab, 'cpt/deeplabv3.pt')
+
+    # detect(fcn, img_pth, save_pth=os.path.join(save_root, f'{img_name}_fcn.png'))
+    # detect(unet, img_pth, save_pth=os.path.join(save_root, f'{img_name}_unet.png'))
+    # detect(deeplab, img_pth, save_pth=os.path.join(save_root, f'{img_name}_deeplab.png'))
+    
+    deeplabp = DeepLabV3p(num_classes=21, backbone='resnet50', pretrained=False).to(device)
+    deeplab101 = DeepLabV3(num_classes=21, backbone='resnet101', pretrained=False).to(device)
+    hrnet = HRNet(num_classes=21, use_OCR=False, pretrained=False).to(device)
+    hrnet_ocr = HRNet(num_classes=21, use_OCR=True, pretrained=False).to(device)
+    
+    deeplabp = load_weights(deeplabp, 'cpt/deeplabv3p.pt')
+    deeplab101 = load_weights(deeplab101, 'cpt/deeplabv3_r101.pt')
+    hrnet = load_weights(hrnet, 'cpt/HRNet.pt')
+    hrnet_ocr = load_weights(hrnet_ocr, 'cpt/HRNet_OCR.pt')
+
+    for i in range(len(img_name)):
+        img_pth = os.path.join(img_root, img_name[i] + '.jpg')
+        detect(deeplabp, img_pth, save_pth=os.path.join(save_root, f'{img_name[i]}_deeplabp.png'))
+        detect(deeplab101, img_pth, save_pth=os.path.join(save_root, f'{img_name[i]}_deeplab101.png'))
+        detect(hrnet, img_pth, save_pth=os.path.join(save_root, f'{img_name[i]}_hrnet.png'))
+        detect(hrnet_ocr, img_pth, save_pth=os.path.join(save_root, f'{img_name[i]}_hrnet_ocr.png'))

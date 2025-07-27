@@ -19,11 +19,22 @@ class MetricComputer:
         # yp: [b, 21, h, w] y: [b, 1, h, w] 计算yp和y的交叉熵损失、ap、iou 若y和yp大小不一致则把 yp 最近邻插值到y的大小
         # probs = torch.nn.functional.softmax(yp, dim=1)
         # print("Softmax min:", probs.min().item(), "max:", probs.max().item())
-        if yp.shape[-2:] != y.shape[-2:]:
-            yp = F.interpolate(yp, size=y.shape[-2:], mode='nearest')
-        loss = self.loss_cpt(yp, y, mode)
-        mpa = self.mpa_cpt(yp, y, mode)
-        miou = self.miou_cpt(yp, y, mode)
+        if isinstance(yp, list):
+            if yp[0].shape[-2:] != y.shape[-2:]:
+                yp[0] = F.interpolate(yp[0], size=y.shape[-2:], mode='nearest')
+            if yp[1].shape[-2:] != y.shape[-2:]:
+                yp[1] = F.interpolate(yp[1], size=y.shape[-2:], mode='nearest')
+            loss1 = self.loss_cpt(yp[0], y, mode)
+            loss2 = self.loss_cpt(yp[1], y, mode)
+            loss = loss1 + 0.3 * loss2
+            mpa = self.mpa_cpt(yp[1], y, mode)
+            miou = self.miou_cpt(yp[0], y, mode)
+        else:
+            if yp.shape[-2:] != y.shape[-2:]:
+                yp = F.interpolate(yp, size=y.shape[-2:], mode='nearest')
+            loss = self.loss_cpt(yp, y, mode)
+            mpa = self.mpa_cpt(yp, y, mode)
+            miou = self.miou_cpt(yp, y, mode)
         return loss, mpa, miou
 
     def loss_cpt(self, yp, y, mode):

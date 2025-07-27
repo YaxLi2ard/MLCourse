@@ -8,9 +8,11 @@ import random
 from model.FCN import FCN
 # from model.UNet import UNet
 from model.UNet_ResNet import UNet_ResNet
-# from model.UNet_ import UNet_
+from model.UNet_ import UNet_
 from model.DeepLabV3 import DeepLabV3
 # from model.DeepLabV3_ import DeepLabV3_
+from model.DeepLabV3p import DeepLabV3p
+from model.HRNet import HRNet
 from VOCSegDataset import *
 from utils import *
 from torch.utils.tensorboard import SummaryWriter
@@ -28,8 +30,8 @@ seed_everything(seed=999)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # 参数
-lr = 0.0001
-batch_size = 32
+lr = 0.00005
+batch_size = 16
 epochs = 999
 img_sz = (320, 320)
 normalize_mean = (0.456, 0.443, 0.409)
@@ -73,12 +75,15 @@ val_list = list(dataloader_val)
 rng.shuffle(val_list)
 iter_val = iter(val_list)
 
+
 # 网络、优化器、计算器
 # model = FCN(num_classes=21, backbone='resnet50', pretrained=True)
 # model = UNet(num_classes=21, base_c=64)
 # model = UNet_ResNet(num_classes=21, backbone='resnet50', pretrained=True)
 # model = UNet_(num_classes=21, backbone='resnet50', pretrained=True)
-model = DeepLabV3(num_classes=21, backbone='resnet50', pretrained=True)
+model = DeepLabV3(num_classes=21, backbone='resnet101', pretrained=True)
+# model = HRNet(num_classes=21, use_OCR=True, pretrained=True)
+# model = DeepLabV3p(num_classes=21, backbone='resnet50', pretrained=True)
 # model = DeepLabV3_(num_classes=21, backbone='resnet50', pretrained=True)
 # print(segmodel.encoders.encoders.keys())
 # model = segmodel.Unet(
@@ -88,7 +93,24 @@ model = DeepLabV3(num_classes=21, backbone='resnet50', pretrained=True)
 #     classes=21                      # 输出分类数
 # )
 model.to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=0.00001)
+
+def set_lr(model, lr):
+    # 所有参数名和参数
+    dwconv_params = []
+    other_params = []
+    for k, v in model.named_parameters():
+        if 'dwconv' in k:
+            dwconv_params.append(v)
+        else:
+            other_params.append(v)
+    optim_params =  [
+        {"params": other_params, "lr": lr},
+        {"params": dwconv_params, "lr": 0.1 * lr},
+    ]
+    return optim_params
+    
+params = set_lr(model, lr)
+optimizer = torch.optim.Adam(params, lr=lr, weight_decay=0.0001)
 # optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=0.0001)
 def lr_lambda(step):
     # 第warmup_steps轮开始时step为warmup_steps-1

@@ -39,4 +39,5 @@ def compute_mean_std(root, resize=None):
 
 if __name__ == '__main__':
     root = '/root/autodl-tmp/MLCourseDataset/pascalvoc/VOCdevkit/VOC2012'
+    
     compute_mean_std(root, resize=(256, 256))

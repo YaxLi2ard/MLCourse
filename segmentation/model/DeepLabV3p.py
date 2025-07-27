@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
-from fvcore.nn import FlopCountAnalysis, parameter_count_table
+from fvcore.nn import FlopCountAnalysis, parameter_count_table, flop_count_table
 
 # -----------------------------------
 # 空洞空间金字塔池化模块 ASPP
@@ -12,14 +12,30 @@ class ASPP(nn.Module):
         super(ASPP, self).__init__()
 
         self.blocks = nn.ModuleList()
+        # self.blocks.append(
+        #     nn.Sequential(
+        #         nn.Conv2d(in_channels, out_channels, 1, bias=False),
+        #         nn.BatchNorm2d(out_channels),
+        #         nn.ReLU(inplace=True)
+        #     )
+        # )
         for rate in rates:
-            self.blocks.append(
-                nn.Sequential(
-                    nn.Conv2d(in_channels, out_channels, 3, padding=rate, dilation=rate, bias=False),
-                    nn.BatchNorm2d(out_channels),
-                    nn.ReLU(inplace=True)
+            if rate == 1:
+                self.blocks.append(
+                    nn.Sequential(
+                        nn.Conv2d(in_channels, out_channels, 1, bias=False),
+                        nn.BatchNorm2d(out_channels),
+                        nn.ReLU(inplace=True)
+                    )
                 )
-            )
+            else:
+                self.blocks.append(
+                    nn.Sequential(
+                        nn.Conv2d(in_channels, out_channels, 3, padding=rate, dilation=rate, bias=False),
+                        nn.BatchNorm2d(out_channels),
+                        nn.ReLU(inplace=True)
+                    )
+                )
 
         # 全局平均池化分支
         self.global_pool = nn.Sequential(
@@ -85,18 +101,19 @@ class BackBone(nn.Module):
         self.layer1 = backbone.layer1
         self.layer2 = backbone.layer2
         # 修改layer3和layer4为stride=1，调整dilation
-        self.layer3 = self._modify_resnet_layer(backbone.layer3, dilate_r=1)
-        self.layer4 = self._modify_resnet_layer(backbone.layer4, dilate_r=2)
+        self.layer3 = self._modify_resnet_layer(backbone.layer3, dilate=[1, 2, 2, 2, 2, 2])
+        self.layer4 = self._modify_resnet_layer(backbone.layer4, dilate=[2, 4, 4])
 
     def forward(self, x):
         x = self.layer0(x)
         x = self.layer1(x)
+        mid_feat = x
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
-        return x
+        return x, mid_feat
 
-    def _modify_resnet_layer(self, layer, dilate_r):
+    def _modify_resnet_layer(self, layer, dilate):
         """
         将layer中所有block的stride改为1，并根据dilate调整conv2的dilation和padding
         """
@@ -107,20 +124,45 @@ class BackBone(nn.Module):
                     block.downsample[0].stride = (1, 1)
                 block.conv2.stride = (1, 1)
             # 修改空洞卷积（conv2）
-            if i == 0:
-                block.conv2.dilation = (dilate_r, dilate_r)
-                block.conv2.padding = (dilate_r, dilate_r)
-            else:
-                block.conv2.dilation = (dilate_r*2, dilate_r*2)
-                block.conv2.padding = (dilate_r*2, dilate_r*2)
+            block.conv2.dilation = (dilate[i], dilate[i])
+            block.conv2.padding = (dilate[i], dilate[i])
         return layer
+
+
+class Decoder(nn.Module):
+    def __init__(self, low_level_dim, x_dim, num_classes):
+        super(Decoder, self).__init__()
+        mid_dim = 53
+        self.conv1 = nn.Conv2d(low_level_dim, mid_dim, 1, bias=False)
+        self.bn1 = nn.BatchNorm2d(mid_dim)
+        self.relu = nn.ReLU(inplace=True)
+
+        self.output = nn.Sequential(
+            nn.Conv2d(mid_dim + x_dim, 256, 3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, 3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.1),
+            nn.Conv2d(256, num_classes, 1, stride=1),
+        )
+
+    def forward(self, x, low_level_features):
+        low_level_features = self.conv1(low_level_features)
+        low_level_features = self.relu(self.bn1(low_level_features))
+        H, W = low_level_features.size(2), low_level_features.size(3)
+
+        x = F.interpolate(x, size=(H, W), mode='bilinear', align_corners=True)
+        x = self.output(torch.cat((low_level_features, x), dim=1))
+        return x
 
 # -----------------------------------
 # DeepLabV3（完整结构）
 # -----------------------------------
-class DeepLabV3(nn.Module):
+class DeepLabV3p(nn.Module):
     def __init__(self, num_classes, backbone='resnet50', pretrained=True):
-        super(DeepLabV3, self).__init__()
+        super(DeepLabV3p, self).__init__()
 
         # 1. 主干网络：ResNet50
         if backbone == 'resnet50':
@@ -144,17 +186,19 @@ class DeepLabV3(nn.Module):
         self.backbone = BackBone(resnet)
 
         # 2. Segmentation Head
-        self.head = DeepLabHead(2048, num_classes)
+        self.aspp = ASPP(in_channels=2048, out_channels=256, rates=[1, 5, 10, 15])
+        self.decoder = Decoder(low_level_dim=256, x_dim=256, num_classes=num_classes)
 
     def forward(self, x):
         input_size = x.shape[2:]  # 原图大小
-        x = self.backbone(x)      # 特征图（H/16）
-        x = self.head(x)          # 输出为 [B, C, H/16, W/16]
+        x, mid_feat = self.backbone(x)      # 特征图 输出为 [B, C, H/8, W/8] [B, 256, H/4, W/4]
+        x = self.aspp(x)  # [B, 256, H/8, W/8]
+        x = self.decoder(x, mid_feat)
         x = F.interpolate(x, size=input_size, mode='bilinear', align_corners=False)
         return x
 
 if __name__ == '__main__':
-    model = DeepLabV3(num_classes=21, backbone='resnet101')
+    model = DeepLabV3p(num_classes=21)
     model.eval()
     # x = torch.randn(1, 3, 256, 256)
     # y = model(x)
@@ -164,3 +208,12 @@ if __name__ == '__main__':
     inputs = x
     flops = FlopCountAnalysis(model, inputs)
     print(f"Total FLOPs: {(flops.total() / 1e9):.3f} G")
+
+    # model = torchvision.models.segmentation.deeplabv3_resnet50(weights=None)
+    # model.eval()
+    # x = torch.randn(1, 3, 320, 320)
+    # inputs = x
+    # flops = FlopCountAnalysis(model, inputs)
+    # print(f"Total FLOPs: {(flops.total() / 1e9):.3f} G")
+    # 打印每一层的 FLOPs（表格形式）
+    print(flop_count_table(flops))
